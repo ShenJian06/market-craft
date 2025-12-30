@@ -3,8 +3,10 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>MarketCraft — Low Poly Market Simulator Builder (Prototype v2)</title>
+  <title>MarketCraft — Low Poly Market Simulator Builder (Prototype v3)</title>
   <link rel="stylesheet" href="style.css"/>
+  <link rel="icon" href="data:,">
+  <meta name="theme-color" content="#0b0c10">
 </head>
 <body>
   <canvas id="c"></canvas>
@@ -12,10 +14,14 @@
   <div id="hud">
     <div class="topbar">
       <div class="brand">MarketCraft</div>
+
       <div class="pill" id="modePill">PLAY</div>
+      <div class="pill" id="moneyPill">MONEY $0</div>
+      <div class="pill" id="plotPill">U: EXPAND $0</div>
+
       <div class="help">
         WASD · Mouse look · Space jump · <b>B</b> build · <b>1–0</b> select · Wheel cycle ·
-        <b>LMB</b> place · <b>RMB</b> break · <b>Q/E</b> rotate
+        <b>LMB</b> place · <b>RMB</b> break · <b>Q/E</b> rotate · <b>U</b> buy plot
       </div>
     </div>
 
@@ -35,6 +41,7 @@
 
       <div class="legend">
         <div class="k">B</div><div class="v">Toggle Build</div>
+        <div class="k">U</div><div class="v">Buy Plot Upgrade</div>
         <div class="k">R</div><div class="v">Reset position</div>
         <div class="k">Esc</div><div class="v">Release mouse</div>
       </div>
@@ -43,22 +50,25 @@
 
   <div id="blocker" class="blocker">
     <div class="panel">
-      <h1>MarketCraft Prototype v2</h1>
+      <h1>MarketCraft Prototype v3</h1>
       <p>Click to lock mouse and start.</p>
-      <p class="muted">Now includes: placeable furniture (counter, shelf, fridge, pallet, produce stand) + automatic sliding glass doors.</p>
+      <p class="muted">
+        Includes: Minecraft-like build grid + furniture + colliders + moving clouds + auto doors.
+        Press <b>U</b> to expand your buildable plot when you have enough money.
+      </p>
       <button id="startBtn">Start</button>
     </div>
   </div>
 
-  <!-- Three.js (no modules) -->
-  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+  <!-- Three.js (classic) -->
+  <script src="https://unpkg.com/three@0.159.0/build/three.min.js"></script>
 
-  <!-- Game scripts -->
-  <script src="catalog.js"></script>
-  <script src="world.js"></script>
-  <script src="inventory.js"></script>
-  <script src="build.js"></script>
-  <script src="ui.js"></script>
-  <script src="main.js"></script>
+  <!-- Game scripts (order matters) -->
+  <script defer src="catalog.js"></script>
+  <script defer src="world.js"></script>
+  <script defer src="inventory.js"></script>
+  <script defer src="build.js"></script>
+  <script defer src="ui.js"></script>
+  <script defer src="main.js"></script>
 </body>
 </html>
