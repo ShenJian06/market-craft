@@ -1,10 +1,11 @@
-// catalog.js — products + furniture registry (low poly)
+// catalog.js — products + furniture registry (low poly, grid 1m) (UPDATED v5.2)
+// ✅ FIX: glass DoubleSide + depthWrite=false (nu mai "dispar" fețele și merge corect din orice unghi)
+// ✅ Keeps: unified auto-door API for ANY door furniture (all isDoor:true) + legacy support
+// ✅ Keeps: passOpenThreshold API
 // Exposes: window.Catalog
-
 (function(){
   "use strict";
 
-  // Simple product list (future: stocking, pricing, tags)
   const PRODUCTS = [
     { id:"water",        name:"Water",        price:1.29, category:"Drinks" },
     { id:"soda",         name:"Soda",         price:1.99, category:"Drinks" },
@@ -14,7 +15,6 @@
     { id:"minced_meat",  name:"Minced Meat",  price:6.99, category:"Food" },
   ];
 
-  // Helper for low-poly materials (no color variants)
   function mat(color, opts={}){
     return new THREE.MeshStandardMaterial(Object.assign({
       color,
@@ -23,285 +23,429 @@
     }, opts));
   }
 
+  // 1 cell = 1 meter
+  // floor thickness = 0.10m -> floor top at 0.10
+  const FLOOR_THICK = 0.10;
+  const FLOOR_TOP   = FLOOR_THICK;
+
+  // (0.10 podea) + (2.90 ușă/fereastră) = 3.00
+  const OPENING_H = 3.0 - FLOOR_TOP;
+
   const M = {
-    metal: mat(0x6b7280, { roughness:0.75, metalness:0.15 }),
-    white: mat(0xe5e7eb, { roughness:0.92 }),
-    dark:  mat(0x111827, { roughness:0.65 }),
-    red:   mat(0xef4444, { roughness:0.85 }),
-    blue:  mat(0x2563eb, { roughness:0.85 }),
-    wood:  mat(0xb7794a, { roughness:0.95 }),
-    sand:  mat(0xd7c49d, { roughness:0.95 }),
-    green: mat(0x22c55e, { roughness:0.92 }),
+    metal:  mat(0x6b7280, { roughness:0.65, metalness:0.35 }),
+    metal2: mat(0x9ca3af, { roughness:0.55, metalness:0.35 }),
+    white:  mat(0xe5e7eb, { roughness:0.92 }),
+    dark:   mat(0x111827, { roughness:0.70 }),
+    red:    mat(0xef4444, { roughness:0.85 }),
+    blue:   mat(0x2563eb, { roughness:0.85 }),
+    wood:   mat(0xb7794a, { roughness:0.92 }),
+    wood2:  mat(0x9a6a3d, { roughness:0.92 }),
+    sand:   mat(0xd7c49d, { roughness:0.95 }),
+    green:  mat(0x22c55e, { roughness:0.92 }),
+
+    // ✅ glass corect (vizibil din ambele părți + fără auto-occlusion)
     glass: new THREE.MeshStandardMaterial({
-      color:0x9be7ff, roughness:0.12, metalness:0.05,
-      transparent:true, opacity:0.28
-    }),
-    neonG: new THREE.MeshStandardMaterial({
-      color:0x33ffb4, emissive:0x33ffb4, emissiveIntensity:0.6,
-      transparent:true, opacity:0.22, roughness:0.3
+      color:0x6fb7dd,
+      roughness:0.05,
+      metalness:0.10,
+      transparent:true,
+      opacity:0.32,
+      side: THREE.DoubleSide,
+      depthWrite:false
     })
   };
 
-  // Furniture definitions (sizes in meters, footprint in grid cells)
+  // size = [W,H,D] in meters
+  // footprint = [cellsX, cellsZ]
   const FURNITURE = [
-    {
-      id:"cashier_counter",
-      name:"Counter",
-      icon:"🧾",
-      size:[3.0, 1.05, 1.2],
-      yOffset:0.0,
-      footprint:[3,2],
-      solid:true
+    { id:"cashier_counter", name:"Cashier", icon:"🧾", size:[3.0, 1.05, 1.0], yOffset:0.0, footprint:[3,1], solid:true },
+    { id:"aisle_shelf",     name:"Shelf",   icon:"🗄️", size:[1.0, 2.25, 0.55], yOffset:0.0, footprint:[1,1], solid:true },
+    { id:"fridge_wall",     name:"Fridge",  icon:"🧊", size:[1.0, 2.20, 0.85], yOffset:0.0, footprint:[1,1], solid:true },
+    { id:"pallet",          name:"Pallet",  icon:"📦", size:[1.0, 0.22, 1.0], yOffset:0.0, footprint:[1,1], solid:true },
+    { id:"produce_stand",   name:"Produce", icon:"🥦", size:[1.0, 1.60, 1.0], yOffset:0.0, footprint:[1,1], solid:true },
+
+    // ✅ DOAR 2 uși glisante în inventar
+    { id:"sliding_door_single", name:"Sliding Door (2m x 3m)", icon:"🚪",
+      size:[2.0, OPENING_H, 0.25], yOffset:FLOOR_TOP, footprint:[2,1],
+      solid:true, isDoor:true, autoFloor:true,
+      door:{ type:"slide", range:2.8, speed:7.0, passOpenThreshold:0.72 }
     },
-    {
-      id:"aisle_shelf",
-      name:"Shelf",
-      icon:"🗄️",
-      size:[1.2, 2.2, 0.55],
-      yOffset:0.0,
-      footprint:[2,1],
-      solid:true
+    { id:"sliding_door_wide",   name:"Sliding Door (3m x 3m)", icon:"🚪",
+      size:[3.0, OPENING_H, 0.25], yOffset:FLOOR_TOP, footprint:[3,1],
+      solid:true, isDoor:true, autoFloor:true,
+      door:{ type:"slide", range:3.0, speed:7.0, passOpenThreshold:0.72 }
     },
-    {
-      id:"fridge_wall",
-      name:"Fridge",
-      icon:"🧊",
-      size:[3.0, 2.2, 0.85],
-      yOffset:0.0,
-      footprint:[3,1],
-      solid:true
+
+    { id:"window_tall_1", name:"Window (1m x 3m)", icon:"🪟",
+      size:[1.0, OPENING_H, 0.25], yOffset:FLOOR_TOP, footprint:[1,1],
+      solid:true, autoFloor:true
     },
-    {
-      id:"pallet",
-      name:"Pallet",
-      icon:"📦",
-      size:[1.2, 0.22, 1.0],
-      yOffset:0.0,
-      footprint:[2,2],
-      solid:true
+    { id:"window_tall_2", name:"Window (2m x 3m)", icon:"🪟",
+      size:[2.0, OPENING_H, 0.25], yOffset:FLOOR_TOP, footprint:[2,1],
+      solid:true, autoFloor:true
     },
-    {
-      id:"produce_stand",
-      name:"Produce",
-      icon:"🥦",
-      size:[1.25, 1.65, 0.95],
-      yOffset:0.0,
-      footprint:[2,2],
-      solid:true
-    },
-    {
-      id:"glass_sliding_door",
-      name:"Glass Door",
-      icon:"🚪",
-      size:[2.0, 2.2, 0.22],
-      yOffset:0.0,
-      footprint:[2,1],
-      solid:true,
-      isDoor:true
-    }
   ];
 
   const FURN_BY_ID = Object.create(null);
   for(const f of FURNITURE) FURN_BY_ID[f.id] = f;
+
+  // ✅ legacy support
+  FURN_BY_ID["glass_sliding_door"] = Object.assign({}, FURN_BY_ID["sliding_door_single"], {
+    id:"glass_sliding_door",
+    name:"Glass Door (legacy)",
+    isDoor:true,
+    autoFloor:true,
+    door:{ type:"slide", range:2.8, speed:7.0, passOpenThreshold:0.72 }
+  });
 
   function addBox(g, w,h,d, x,y,z, material){
     const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), material);
     m.position.set(x,y,z);
     m.castShadow = true;
     m.receiveShadow = true;
+    // ✅ transparent safety
+    if(m.material && m.material.transparent){
+      m.material.depthWrite = false;
+      m.material.side = THREE.DoubleSide;
+    }
     g.add(m);
     return m;
   }
 
-  function makeCashierCounter(){
+  // -------------------------
+  // MODELS
+  // Origin: centered X/Z, base at Y=0
+  // -------------------------
+
+  function makeCashierCounter(def){
     const g = new THREE.Group();
-    // base
-    addBox(g, 3.0, 0.95, 1.2, 0, 0.475, 0, mat(0xd1a2b8, { roughness:0.92 }));
-    // top surface
-    addBox(g, 3.05, 0.08, 1.25, 0, 0.95, 0, mat(0xede9fe, { roughness:0.65 }));
-    // register block
-    addBox(g, 0.40, 0.18, 0.30, -1.05, 1.05, -0.20, M.dark);
-    // screen
-    addBox(g, 0.28, 0.22, 0.06, -1.02, 1.22, -0.33, mat(0x0b1022, { roughness:0.4 }));
-    // scanner
-    addBox(g, 0.22, 0.08, 0.22, -0.55, 1.02, -0.12, mat(0x1f2937, { roughness:0.7 }));
-    // stool (simple)
-    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.06,0.55,8), M.metal);
-    leg.position.set(1.1, 0.275, -0.65);
+    const W = def.size[0], D = def.size[2];
+
+    const bodyH = 0.92;
+    addBox(g, W, bodyH, D, 0, bodyH/2, 0, mat(0xd1a2b8, { roughness:0.92 }));
+    addBox(g, W+0.04, 0.08, D+0.04, 0, bodyH + 0.04, 0, mat(0xefe7ff, { roughness:0.75 }));
+    addBox(g, W*0.42, 0.03, D*0.70, W*0.12, bodyH + 0.065, 0, mat(0x1f2937, { roughness:0.85 }));
+
+    addBox(g, 0.36, 0.16, 0.28, -W/2 + 0.38, bodyH + 0.08, -D/2 + 0.28, mat(0xe5e7eb,{roughness:0.92}));
+    addBox(g, 0.30, 0.18, 0.05, -W/2 + 0.40, bodyH + 0.22, -D/2 + 0.23, mat(0x0b1022, { roughness:0.35 }));
+    addBox(g, 0.20, 0.06, 0.18, -W/2 + 0.78, bodyH + 0.06, -D/2 + 0.30, mat(0x111827,{roughness:0.70}));
+
+    addBox(g, 0.55, 0.78, 0.85, -W/2 + 0.15, 0.39, 0, mat(0xc98aa7, { roughness:0.92 }));
+
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.05,0.55,10), mat(0x6b7280,{roughness:0.65, metalness:0.35}));
+    leg.position.set(W/2 - 0.35, 0.275, D/2 - 0.22);
     leg.castShadow = true; leg.receiveShadow = true;
     g.add(leg);
-    const seat = new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.22,0.08,10), mat(0x374151,{roughness:0.9}));
-    seat.position.set(1.1, 0.61, -0.65);
+
+    const seat = new THREE.Mesh(new THREE.CylinderGeometry(0.18,0.18,0.07,12), mat(0x374151,{roughness:0.9}));
+    seat.position.set(W/2 - 0.35, 0.61, D/2 - 0.22);
     seat.castShadow = true; seat.receiveShadow = true;
     g.add(seat);
+
     return g;
   }
 
-  function makeAisleShelf(){
+  function makeAisleShelf(def){
     const g = new THREE.Group();
-    // side panels
-    addBox(g, 0.06, 2.2, 0.55, -0.57, 1.10, 0, M.white);
-    addBox(g, 0.06, 2.2, 0.55,  0.57, 1.10, 0, M.white);
-    // back spine
-    addBox(g, 1.14, 2.2, 0.06, 0, 1.10, -0.245, M.white);
-    // shelves
-    const shelfMat = mat(0xf3f4f6, { roughness:0.95 });
+    const W = def.size[0], H = def.size[1], D = def.size[2];
+
+    const upr = 0.045;
+    const xU = W/2 - upr/2;
+    addBox(g, upr, H, D, -xU, H/2, 0, mat(0x9ca3af,{roughness:0.55, metalness:0.35}));
+    addBox(g, upr, H, D,  xU, H/2, 0, mat(0x9ca3af,{roughness:0.55, metalness:0.35}));
+
+    addBox(g, W - upr*2, H, 0.03, 0, H/2, -D/2 + 0.015, mat(0xe5e7eb,{roughness:0.92}));
+    addBox(g, W, 0.12, D, 0, 0.06, 0, mat(0xd1d5db,{roughness:0.95}));
+
+    const shelves = 5;
+    const innerW = W - upr*2 - 0.02;
+    const innerD = D - 0.06;
+    for(let i=0;i<shelves;i++){
+      const y = 0.28 + i*((H-0.55)/(shelves-1));
+      addBox(g, innerW, 0.04, innerD, 0, y, 0.01, mat(0xf3f4f6,{roughness:0.95}));
+      addBox(g, innerW, 0.03, 0.03, 0, y+0.02, D/2 - 0.035, mat(0xe5e7eb,{roughness:0.95}));
+    }
+
+    addBox(g, W, 0.12, 0.10, 0, H - 0.06, -D/2 + 0.05, mat(0xe5e7eb,{roughness:0.92}));
+    return g;
+  }
+
+  function makeFridgeWall(def){
+    const g = new THREE.Group();
+    const W = def.size[0], H = def.size[1], D = def.size[2];
+
+    addBox(g, W, H, D, 0, H/2, 0, mat(0xcfd5dd,{roughness:0.35, metalness:0.55}));
+    addBox(g, W-0.10, H-0.20, D-0.22, 0, H/2 + 0.02, -0.04, mat(0x1f2937,{roughness:0.92}));
+
+    const glassZ = D/2 - 0.04;
+    const door = addBox(g, W-0.08, H-0.18, 0.06, 0, H/2, glassZ, M.glass);
+    door.material.opacity = 0.26;
+
+    addBox(g, 0.05, 0.95, 0.04, W/2 - 0.12, H*0.55, glassZ+0.01, mat(0x9ca3af,{roughness:0.4, metalness:0.6}));
+
+    const shelfMat = mat(0xaab2bd,{roughness:0.55, metalness:0.2});
     for(let i=0;i<5;i++){
-      addBox(g, 1.14, 0.06, 0.52, 0, 0.26 + i*0.44, 0.04, shelfMat);
+      addBox(g, W-0.18, 0.03, D-0.30, 0, 0.45 + i*0.32, -0.06, shelfMat);
     }
-    // kick plate
-    addBox(g, 1.14, 0.10, 0.55, 0, 0.05, 0, mat(0xd1d5db, { roughness:0.95 }));
+
+    addBox(g, W, 0.18, 0.08, 0, 0.09, D/2 - 0.08, mat(0x9aa3ad,{roughness:0.45, metalness:0.55}));
+    addBox(g, W, 0.16, D, 0, H - 0.08, 0, mat(0xd7dde5,{roughness:0.35, metalness:0.55}));
     return g;
   }
 
-  function makeFridgeWall(){
+  function makePallet(def){
     const g = new THREE.Group();
-    // body
-    addBox(g, 3.0, 2.2, 0.85, 0, 1.10, 0, mat(0xe5e7eb, { roughness:0.9 }));
-    // inner cavity (dark inset)
-    addBox(g, 2.86, 1.95, 0.55, 0, 1.12, 0.12, mat(0x111827, { roughness:0.9 }));
-    // glass front
-    const glass = addBox(g, 2.92, 2.0, 0.08, 0, 1.10, 0.40, M.glass);
-    glass.material.opacity = 0.24;
-    // shelves inside
-    const shelfMat = mat(0x9ca3af, { roughness:0.85, metalness:0.05 });
-    for(let i=0;i<4;i++){
-      addBox(g, 2.74, 0.04, 0.44, 0, 0.55 + i*0.40, 0.10, shelfMat);
-    }
-    // red ends (like the reference)
-    addBox(g, 0.08, 2.2, 0.85, -1.46, 1.10, 0, mat(0xef4444, { roughness:0.85 }));
-    addBox(g, 0.08, 2.2, 0.85,  1.46, 1.10, 0, mat(0xef4444, { roughness:0.85 }));
-    return g;
-  }
+    const W = def.size[0], H = def.size[1], D = def.size[2];
+    const wood = mat(0xb7794a,{roughness:0.92});
 
-  function makePallet(){
-    const g = new THREE.Group();
-    const wood = mat(0xb97a4f, { roughness:0.95 });
+    addBox(g, W-0.06, 0.05, 0.12, 0, 0.025, -D/2 + 0.18, wood);
+    addBox(g, W-0.06, 0.05, 0.12, 0, 0.025,  0.00, wood);
+    addBox(g, W-0.06, 0.05, 0.12, 0, 0.025,  D/2 - 0.18, wood);
 
-    // bottom runners
-    addBox(g, 1.18, 0.06, 0.12, 0, 0.03, -0.38, wood);
-    addBox(g, 1.18, 0.06, 0.12, 0, 0.03,  0.00, wood);
-    addBox(g, 1.18, 0.06, 0.12, 0, 0.03,  0.38, wood);
-
-    // blocks
-    for(const x of [-0.50, 0, 0.50]){
-      for(const z of [-0.38, 0.0, 0.38]){
-        addBox(g, 0.12, 0.10, 0.12, x, 0.11, z, wood);
+    const bx = [-W/2 + 0.18, 0, W/2 - 0.18];
+    const bz = [-D/2 + 0.18, 0, D/2 - 0.18];
+    for(const x of bx){
+      for(const z of bz){
+        addBox(g, 0.10, 0.10, 0.10, x, 0.10, z, mat(0x9a6a3d,{roughness:0.92}));
       }
     }
 
-    // top slats
-    for(let i=0;i<7;i++){
-      addBox(g, 1.18, 0.04, 0.10, 0, 0.18, -0.40 + i*0.13, wood);
+    const slats = 7;
+    for(let i=0;i<slats;i++){
+      const z = -D/2 + 0.12 + i*((D-0.24)/(slats-1));
+      addBox(g, W-0.06, 0.04, 0.09, 0, H - 0.02, z, wood);
     }
-
     return g;
   }
 
-  function makeProduceStand(){
+  function makeProduceStand(def){
     const g = new THREE.Group();
+    const W = def.size[0], H = def.size[1], D = def.size[2];
+
     const frame = mat(0x111827, { roughness:0.8, metalness:0.15 });
-    const tray = mat(0x1f2937, { roughness:0.85 });
+    const crate = mat(0xcaa77a, { roughness:0.92 });
+    const crate2= mat(0xb48b5f, { roughness:0.92 });
 
-    // base frame
-    addBox(g, 1.25, 0.08, 0.95, 0, 0.04, 0, frame);
-    addBox(g, 0.08, 1.55, 0.08, -0.58, 0.78, -0.40, frame);
-    addBox(g, 0.08, 1.55, 0.08,  0.58, 0.78, -0.40, frame);
-    addBox(g, 0.08, 1.30, 0.08, -0.58, 0.65,  0.40, frame);
-    addBox(g, 0.08, 1.30, 0.08,  0.58, 0.65,  0.40, frame);
+    addBox(g, W, 0.08, D, 0, 0.04, 0, frame);
+    addBox(g, 0.06, 1.15, D, -W/2+0.03, 0.575, 0, frame);
+    addBox(g, 0.06, 1.15, D,  W/2-0.03, 0.575, 0, frame);
+    addBox(g, W-0.10, 0.50, D-0.10, 0, 0.25, 0, mat(0x1f2937,{roughness:0.9}));
 
-    // angled trays (3 levels)
     const levels = [
-      { y:0.55, z:0.20, rot:-0.22, w:1.14, d:0.62 },
-      { y:0.95, z:0.06, rot:-0.22, w:1.14, d:0.62 },
-      { y:1.35, z:-0.08, rot:-0.22, w:1.14, d:0.62 },
+      { y:0.70, z: 0.18, rot:-0.22 },
+      { y:1.05, z: 0.08, rot:-0.22 },
+      { y:1.38, z:-0.02, rot:-0.22 },
     ];
-    for(const L of levels){
-      const t = new THREE.Mesh(new THREE.BoxGeometry(L.w, 0.06, L.d), tray);
-      t.position.set(0, L.y, L.z);
-      t.rotation.x = L.rot;
-      t.castShadow = true; t.receiveShadow = true;
-      g.add(t);
+    for(let li=0; li<levels.length; li++){
+      const L = levels[li];
 
-      // low poly "produce" blobs (fixed colors)
-      const colors = [0x22c55e, 0xf97316, 0xeab308, 0xef4444];
-      for(let i=0;i<8;i++){
-        const p = new THREE.Mesh(new THREE.SphereGeometry(0.08, 7, 6), mat(colors[i % colors.length], { roughness:0.95 }));
-        p.position.set(-0.48 + (i%4)*0.32, L.y+0.10, L.z + (i<4 ? -0.05 : 0.18));
-        p.castShadow = true;
-        g.add(p);
-      }
+      const tray = new THREE.Mesh(new THREE.BoxGeometry(W-0.12, 0.10, D*0.70), crate);
+      tray.position.set(0, L.y, L.z);
+      tray.rotation.x = L.rot;
+      tray.castShadow = true; tray.receiveShadow = true;
+      g.add(tray);
+
+      const lip = new THREE.Mesh(new THREE.BoxGeometry(W-0.10, 0.06, 0.06), crate2);
+      lip.position.set(0, L.y + 0.05, L.z + (D*0.35));
+      lip.rotation.x = L.rot;
+      lip.castShadow = true; lip.receiveShadow = true;
+      g.add(lip);
     }
 
-    // small top sign
-    addBox(g, 1.05, 0.12, 0.08, 0, 1.60, -0.42, mat(0x111827,{roughness:0.7}));
+    addBox(g, W, 0.06, D, 0, H - 0.03, -D*0.15, frame);
     return g;
   }
 
-  function makeGlassSlidingDoor(){
+  // 3m total (cu FLOOR_TOP): ușă glisantă cu transom sus
+  function makeSlidingDoorEntrance(def){
     const g = new THREE.Group();
+    const W = def.size[0], H = def.size[1], D = def.size[2];
 
-    // frame
-    addBox(g, 2.0, 2.2, 0.08, 0, 1.10, 0, mat(0x9ca3af, { roughness:0.75, metalness:0.15 }));
-    // opening (inner)
-    const inner = new THREE.Mesh(new THREE.BoxGeometry(1.92, 2.05, 0.06), mat(0x111827,{roughness:0.95}));
-    inner.position.set(0, 1.08, 0.01);
-    inner.castShadow = false;
-    inner.receiveShadow = true;
-    g.add(inner);
+    const frame = mat(0xcfd5dd,{roughness:0.35, metalness:0.55});
+    const rail  = mat(0xb6bec8,{roughness:0.40, metalness:0.55});
+    const stileMat  = mat(0x9aa3ad,{roughness:0.45, metalness:0.55});
+    const handleMat = mat(0x6b7280,{roughness:0.5, metalness:0.35});
 
-    // panels
-    const left = new THREE.Mesh(new THREE.BoxGeometry(0.95, 2.0, 0.04), M.glass);
-    const right = new THREE.Mesh(new THREE.BoxGeometry(0.95, 2.0, 0.04), M.glass);
-    left.position.set(-0.48, 1.08, 0.05);
-    right.position.set(0.48, 1.08, 0.05);
-    left.castShadow = false; right.castShadow = false;
-    left.receiveShadow = true; right.receiveShadow = true;
-    g.add(left); g.add(right);
+    const postW = 0.08;
+    const topBeamH = 0.14;
 
-    // subtle handles
-    addBox(g, 0.08, 0.55, 0.03, -0.10, 1.02, 0.085, mat(0x6b7280,{roughness:0.5, metalness:0.35}));
-    addBox(g, 0.08, 0.55, 0.03,  0.10, 1.02, 0.085, mat(0x6b7280,{roughness:0.5, metalness:0.35}));
+    const transomH = 0.55;
+    const transomY0 = H - topBeamH - transomH;
 
-    // Auto-slide behavior fields
+    addBox(g, postW, H, D, -W/2 + postW/2, H/2, 0, frame);
+    addBox(g, postW, H, D,  W/2 - postW/2, H/2, 0, frame);
+
+    addBox(g, W, topBeamH, D, 0, H - topBeamH/2, 0, frame);
+    addBox(g, W-0.12, 0.05, D+0.02, 0, H - 0.03, 0.01, rail);
+
+    const transomGlass = new THREE.Mesh(new THREE.BoxGeometry(W - postW*2 - 0.04, transomH, 0.04), M.glass);
+    transomGlass.position.set(0, transomY0 + transomH/2, D/2 - 0.03);
+    transomGlass.castShadow = true; transomGlass.receiveShadow = true;
+    g.add(transomGlass);
+
+    addBox(g, W - postW*2 - 0.02, 0.03, D, 0, transomY0, 0, stileMat);
+
+    const panelH = transomY0 - 0.02;
+    const panelW = (W/2) - 0.10;
+    const panelT = 0.04;
+
+    const left  = new THREE.Mesh(new THREE.BoxGeometry(panelW, panelH, panelT), M.glass);
+    const right = new THREE.Mesh(new THREE.BoxGeometry(panelW, panelH, panelT), M.glass);
+
+    const closedX = (panelW/2) + 0.02;
+    const y = panelH/2;
+
+    left.position.set(-closedX, y, D/2 - 0.03);
+    right.position.set( closedX, y, D/2 - 0.03);
+
+    left.castShadow = true; left.receiveShadow = true;
+    right.castShadow = true; right.receiveShadow = true;
+
+    const stileW = 0.03;
+    const stileL = new THREE.Mesh(new THREE.BoxGeometry(stileW, panelH, 0.02), stileMat);
+    const stileR = new THREE.Mesh(new THREE.BoxGeometry(stileW, panelH, 0.02), stileMat);
+    stileL.position.set(panelW/2 - stileW/2, 0, 0);
+    stileR.position.set(-panelW/2 + stileW/2, 0, 0);
+    left.add(stileL);
+    right.add(stileR);
+
+    addBox(left,  0.04, 0.55, 0.02,  panelW/2 - 0.08, 0, 0.03, handleMat);
+    addBox(right, 0.04, 0.55, 0.02, -panelW/2 + 0.08, 0, 0.03, handleMat);
+
+    g.add(left);
+    g.add(right);
+
+    addBox(g, 0.22, 0.08, 0.10, 0, H - 0.12, D/2 - 0.02, mat(0x1f2937,{roughness:0.6}));
+
+    const slide = Math.max(0.42, (W/2) - 0.16);
+
+    const passThr = (def.door && typeof def.door.passOpenThreshold === "number") ? def.door.passOpenThreshold : 0.72;
+    const range   = (def.door && typeof def.door.range === "number") ? def.door.range : 2.8;
+    const speed   = (def.door && typeof def.door.speed === "number") ? def.door.speed : 7.0;
+
     g.userData._door = {
+      type: "slide",
       left, right,
       open: 0,
-      speed: 5.5,
-      range: 2.4, // meters trigger radius
-      slide: 0.46 // how far each panel slides
+      target: 0,
+      speed,
+      range,
+      slide,
+      passOpenThreshold: passThr,
+      closedLX: left.position.x,
+      closedRX: right.position.x
     };
 
     return g;
   }
 
+  function makeTallWindow(def){
+    const g = new THREE.Group();
+    const W = def.size[0], H = def.size[1], D = def.size[2];
+
+    const frame = mat(0xcfd5dd,{roughness:0.35, metalness:0.55});
+    const stileMat = mat(0x9aa3ad,{roughness:0.45, metalness:0.55});
+    const postW = 0.08;
+    const topBeamH = 0.14;
+
+    const transomH = 0.55;
+    const transomY0 = H - topBeamH - transomH;
+
+    addBox(g, postW, H, D, -W/2 + postW/2, H/2, 0, frame);
+    addBox(g, postW, H, D,  W/2 - postW/2, H/2, 0, frame);
+
+    addBox(g, W, topBeamH, D, 0, H - topBeamH/2, 0, frame);
+
+    const transomGlass = new THREE.Mesh(new THREE.BoxGeometry(W - postW*2 - 0.04, transomH, 0.04), M.glass);
+    transomGlass.position.set(0, transomY0 + transomH/2, D/2 - 0.03);
+    transomGlass.castShadow = true; transomGlass.receiveShadow = true;
+    g.add(transomGlass);
+
+    addBox(g, W - postW*2 - 0.02, 0.03, D, 0, transomY0, 0, stileMat);
+
+    const mainH = transomY0 - 0.02;
+    const mainGlass = new THREE.Mesh(new THREE.BoxGeometry(W - postW*2 - 0.04, mainH, 0.04), M.glass);
+    mainGlass.position.set(0, mainH/2, D/2 - 0.03);
+    mainGlass.castShadow = true; mainGlass.receiveShadow = true;
+    g.add(mainGlass);
+
+    return g;
+  }
+
   function createFurnitureMesh(id){
+    const def = FURN_BY_ID[id];
+    if(!def) return new THREE.Group();
+
     switch(id){
-      case "cashier_counter": return makeCashierCounter();
-      case "aisle_shelf": return makeAisleShelf();
-      case "fridge_wall": return makeFridgeWall();
-      case "pallet": return makePallet();
-      case "produce_stand": return makeProduceStand();
-      case "glass_sliding_door": return makeGlassSlidingDoor();
+      case "cashier_counter": return makeCashierCounter(def);
+      case "aisle_shelf":     return makeAisleShelf(def);
+      case "fridge_wall":     return makeFridgeWall(def);
+      case "pallet":          return makePallet(def);
+      case "produce_stand":   return makeProduceStand(def);
+
+      case "sliding_door_single":
+      case "sliding_door_wide":
+      case "glass_sliding_door":
+        return makeSlidingDoorEntrance(def);
+
+      case "window_tall_1":
+      case "window_tall_2":
+        return makeTallWindow(def);
+
       default: return new THREE.Group();
     }
   }
 
-  // Door update helper (works for placed & world doors)
+  // -------------------------
+  // AUTO DOOR API (generic)
+  // -------------------------
   function updateAutoDoor(doorGroup, playerPos, dt){
     const d = doorGroup.userData && doorGroup.userData._door;
     if(!d) return;
+
     const cx = doorGroup.position.x;
-    const cy = doorGroup.position.y + 1.0;
     const cz = doorGroup.position.z;
-    const dist = Math.hypot(playerPos.x - cx, (playerPos.y-1.0) - cy, playerPos.z - cz);
-    const target = dist < d.range ? 1 : 0;
-    d.open += (target - d.open) * Math.min(1, dt * d.speed);
+    const dx = playerPos.x - cx;
+    const dz = playerPos.z - cz;
+    const dist = Math.hypot(dx, dz);
+
+    const range = (typeof d.range === "number") ? d.range : 2.8;
+    d.target = dist < range ? 1 : 0;
+
+    const k = (typeof d.speed === "number") ? d.speed : 7.0;
+    d.open += (d.target - d.open) * (1 - Math.exp(-k * dt));
+
     const t = d.open;
 
-    // slide panels sideways in local space
-    d.left.position.x  = -0.48 - t * d.slide;
-    d.right.position.x =  0.48 + t * d.slide;
+    if(d.type === "slide" && d.left && d.right){
+      const slide = (typeof d.slide === "number") ? d.slide : 0.8;
+
+      const closedLX = (typeof d.closedLX === "number") ? d.closedLX : d.left.position.x;
+      const closedRX = (typeof d.closedRX === "number") ? d.closedRX : d.right.position.x;
+
+      d.left.position.x  = closedLX  - t * slide;
+      d.right.position.x = closedRX  + t * slide;
+    }
+  }
+
+  function getAutoDoorOpen(doorGroup){
+    const d = doorGroup.userData && doorGroup.userData._door;
+    return d ? d.open : 0;
+  }
+
+  function getAutoDoorPassThreshold(doorGroup){
+    const d = doorGroup.userData && doorGroup.userData._door;
+    if(!d) return 0.72;
+    return (typeof d.passOpenThreshold === "number") ? d.passOpenThreshold : 0.72;
+  }
+
+  function listDoorIds(){
+    const out = [];
+    for(const f of FURNITURE){
+      if(f && f.isDoor) out.push(f.id);
+    }
+    out.push("glass_sliding_door");
+    return out;
   }
 
   window.Catalog = {
@@ -309,6 +453,14 @@
     FURNITURE,
     FURN_BY_ID,
     createFurnitureMesh,
-    updateAutoDoor
+
+    updateAutoDoor,
+    getAutoDoorOpen,
+    getAutoDoorPassThreshold,
+    listDoorIds,
+
+    _M: M,
+    _OPENING_H: OPENING_H,
+    _FLOOR_TOP: FLOOR_TOP
   };
 })();
